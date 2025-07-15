@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GPS·MQTT Tracker PWA</title>
+
+  <!-- 기본 PWA 설정 -->
+  <meta name="theme-color" content="#007bff" />
+  <link rel="manifest" href="manifest.webmanifest" />
+
+  <!-- 외부 라이브러리 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" defer></script>
+
+  <style>
+    :root {--primary:#007bff;--light:#f8f9fa;--border:#ccc;}
+    body{display:flex;margin:0;font-family:sans-serif;overflow:hidden;background:var(--light)}
+    #map-wrap{flex:1;height:100vh;display:none;position:relative}
+    #map{height:100%}
+    #status{position:absolute;top:10px;left:10px;z-index:1000;background:#fff;padding:8px 15px;border-radius:5px;box-shadow:0 2px 4px rgba(0,0,0,.15)}
+
+    #panel{width:340px;height:100vh;display:none;flex-direction:column;border-left:1px solid var(--border);background:#fff;padding:10px;box-sizing:border-box}
+    #rx-log{flex:1 1 50%;max-height:50%;overflow-y:auto;font-size:.9em}
+    #tx-log{flex:1 1 auto;overflow-y:auto;font-size:.9em;margin-top:6px}
+    .log-entry{padding:4px 2px;border-bottom:1px solid #eee;word-wrap:break-word}
+    .stamp{color:#888;font-size:.75em;display:block}
+
+    #pub-ui input{width:100%;padding:6px;border:1px solid #bbb;border-radius:4px;margin-bottom:6px;box-sizing:border-box}
+    #pub-ui button{width:100%;padding:8px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer}
+    #pub-ui button:hover{background:#0056b3}
+
+    #connect-wrap{display:flex;align-items:center;justify-content:center;width:100vw;height:100vh}
+    #connect-card{width:340px;background:#fff;padding:26px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+    #connect-card h2{text-align:center;margin-top:0}
+    .field{margin-bottom:14px}
+    .field label{display:block;font-weight:bold;margin-bottom:4px}
+    .field input{width:100%;padding:8px;border:1px solid var(--border);border-radius:4px;box-sizing:border-box}
+    #btn-connect{width:100%;padding:10px;background:var(--primary);color:#fff;border:none;border-radius:4px;font-size:16px;cursor:pointer}
+    #btn-connect:hover{background:#0056b3}
+
+    @media(max-width:768px){
+      body{flex-direction:column}
+      #map-wrap{height:60vh}
+      #panel{width:100%;height:40vh;border-left:none;border-top:1px solid var(--border)}
+    }
+  </style>
+</head>
+<body>
+<!-- 접속폼 -->
+<section id="connect-wrap">
+  <form id="connect-card">
+    <h2>MQTT 접속</h2>
+    <div class="field"><label>Broker</label><input id="host" value="broker.hivemq.com"></div>
+    <div class="field"><label>Port</label><input id="port" type="number" value="8884"></div>
+    <div class="field"><label>SUB Topic</label><input id="sub" value="gps/device/test1234/location"></div>
+    <div class="field"><label>PUB Topic</label><input id="pub" value="gps/device/test1234/ecollar"></div>
+    <button id="btn-connect" type="submit">연결</button>
+  </form>
+</section>
+
+<!-- 지도 + 로그 -->
+<section id="map-wrap">
+  <div id="map"></div>
+  <div id="status">브로커 연결 대기</div>
+</section>
+
+<section id="panel">
+  <div style="font-weight:bold;margin-bottom:6px">수신 로그</div>
+  <div id="rx-log"></div>
+  <div id="pub-ui" style="margin-top:auto">
+    <div style="font-weight:bold">메시지 전송</div>
+    <input id="msg-input" placeholder="메시지를 입력…">
+    <button id="btn-publish" disabled>Publish</button>
+    <div style="font-weight:bold;margin:6px 0 4px">전송 로그</div>
+    <div id="tx-log"></div>
+  </div>
+</section>
+
+<!-- PWA Service Worker 등록 -->
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(console.error);
+}
+</script>
+
+<script>
+let map, marker, track, client, pubTopic;
+const MAX_LOG=50;
+const $=id=>document.getElementById(id);
+const rxLog=$('rx-log'), txLog=$('tx-log');
+
+$('connect-card').addEventListener('submit',e=>{
+  e.preventDefault();
+  const host=$('host').value.trim();
+  const port=+$('port').value;
+  const sub=$('sub').value.trim();
+  pubTopic=$('pub').value.trim();
+  if(!host||!port||!sub||!pubTopic){alert('모든 필드를 입력하세요');return;}
+
+  $('connect-wrap').style.display='none';
+  $('map-wrap').style.display='block';
+  $('panel').style.display='flex';
+  initMap();
+  connectMQTT(host,port,sub);
+});
+
+$('btn-publish').onclick=()=>{
+  const msg=$('msg-input').value.trim();
+  if(!msg)return;
+  const m=new Paho.MQTT.Message(msg); m.destinationName=pubTopic;
+  client.send(m);
+  log(msg,txLog);
+  $('msg-input').value='';
+};
+
+function connectMQTT(host,port,sub){
+  const id='PWA-'+Date.now();
+  client=new Paho.MQTT.Client(host,port,id);
+  client.onConnectionLost=r=>$('status').textContent='연결 종료: '+r.errorMessage;
+  client.onMessageArrived=onMsg;
+  client.connect({useSSL:true,onSuccess:()=>{
+      $('status').textContent='연결됨 (SUB '+sub+')';
+      client.subscribe(sub);
+      $('btn-publish').disabled=false;
+  },onFailure:r=>$('status').textContent='연결 실패: '+r.errorMessage});
+}
+function onMsg(m){
+  log(m.payloadString,rxLog);
+  const [la,lo]=m.payloadString.split(',').map(Number);
+  if(isNaN(la)||isNaN(lo))return;
+  if(!marker){
+    marker=L.marker([la,lo]).addTo(map).bindPopup('현위치').openPopup();
+  }
+  marker.setLatLng([la,lo]);
+  track.addLatLng([la,lo]);
+  map.panTo([la,lo]);
+}
+function log(txt,container){
+  const div=document.createElement('div');
+  div.className='log-entry';
+  div.innerHTML=`${txt}<span class="stamp">${new Date().toLocaleTimeString()}</span>`;
+  container.prepend(div);
+  if(container.childElementCount>MAX_LOG)container.lastChild.remove();
+}
+function initMap(){
+  map=L.map('map').setView([37.5665,126.9780],13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  track=L.polyline([], {color:'#d00'}).addTo(map);
+}
+</script>
+</body>
+</html>
