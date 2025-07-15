@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GPS·MQTT Tracker PWA</title>
+  <title>GPS·MQTT Tracker</title>
   <meta name="theme-color" content="#007bff" />
   <link rel="manifest" href="manifest.webmanifest" />
 
@@ -13,34 +13,44 @@
 
   <style>
     :root {--primary:#007bff;--light:#f8f9fa;--border:#ccc;}
-    body{display:flex;margin:0;font-family:sans-serif;overflow:hidden;background:var(--light)}
+    body{display:flex;margin:0;font-family:sans-serif;background:var(--light);overflow:hidden}
     #map-wrap{flex:1;height:100vh;display:none;position:relative}
     #map{height:100%}
     #status{position:absolute;top:10px;left:10px;z-index:1000;background:#fff;padding:8px 15px;border-radius:5px;box-shadow:0 2px 4px rgba(0,0,0,.15)}
 
-    #panel{width:340px;height:100vh;display:none;flex-direction:column;border-left:1px solid var(--border);background:#fff;padding:10px;box-sizing:border-box}
-    #rx-log, #tx-log {
-      max-height: 50%;
-      overflow-y: auto;
-      font-size: .9em;
-      border: 1px solid #eee;
-      padding: 4px;
-      box-sizing: border-box;
+    #panel{
+      width:340px;height:100vh;
+      display:flex;flex-direction:column;
+      border-left:1px solid var(--border);
+      background:#fff;padding:10px;
+      box-sizing:border-box;display:none;
+      min-height:0;
     }
-    .log-entry{padding:4px 2px;border-bottom:1px solid #eee;word-wrap:break-word}
-    .stamp{color:#888;font-size:.75em;display:block}
 
+    #rx-log, #tx-log {
+      height:50%; overflow-y:auto;
+      font-size:0.9em; border:1px solid #eee;
+      padding:4px; box-sizing:border-box;
+    }
+
+    .log-entry{padding:4px 2px;border-bottom:1px solid #eee}
+    .stamp{color:#888;font-size:0.75em;display:block}
+
+    #pub-ui {
+      display:flex;flex-direction:column;
+      height:50%;min-height:0;
+    }
     #pub-ui input, #pub-ui button {
-      width: 100%; padding: 6px; box-sizing: border-box;
+      width:100%; padding:6px; box-sizing:border-box;
     }
     #pub-ui input {
-      border: 1px solid #bbb; border-radius: 4px; margin-bottom: 6px;
+      border:1px solid #bbb; border-radius:4px; margin-bottom:6px;
     }
     #pub-ui button {
-      background: var(--primary); color: #fff; border: none;
-      border-radius: 4px; cursor: pointer; margin-bottom: 10px;
+      background:var(--primary); color:#fff;
+      border:none; border-radius:4px; cursor:pointer;
+      margin-bottom:10px;
     }
-    #pub-ui button:hover {background:#0056b3}
 
     #connect-wrap{display:flex;align-items:center;justify-content:center;width:100vw;height:100vh}
     #connect-card{width:340px;background:#fff;padding:26px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
@@ -51,50 +61,48 @@
     #btn-connect{width:100%;padding:10px;background:var(--primary);color:#fff;border:none;border-radius:4px;font-size:16px;cursor:pointer}
     #btn-connect:hover{background:#0056b3}
 
-    @media(max-width:768px){
+    @media (max-width:768px){
       body{flex-direction:column}
       #map-wrap{height:60vh}
-      #panel{width:100%;height:40vh;border-left:none;border-top:1px solid var(--border)}
+      #panel{
+        width:100%; height:40vh;
+        border-left:none; border-top:1px solid var(--border)
+      }
     }
   </style>
 </head>
 <body>
 
-<!-- 접속 폼 -->
+<!-- 연결 화면 -->
 <section id="connect-wrap">
   <form id="connect-card">
     <h2>MQTT 접속</h2>
-    <div class="field"><label>Broker</label><input id="host" value="broker.hivemq.com"></div>
-    <div class="field"><label>Port</label><input id="port" type="number" value="8884"></div>
-    <div class="field"><label>SUB Topic</label><input id="sub" value="gps/device/test1234/location"></div>
-    <div class="field"><label>PUB Topic</label><input id="pub" value="gps/device/test1234/ecollar"></div>
+    <div class="field"><label>Broker</label><input id="host" value="broker.hivemq.com" /></div>
+    <div class="field"><label>Port</label><input id="port" type="number" value="8884" /></div>
+    <div class="field"><label>SUB Topic</label><input id="sub" value="gps/device/test1234/location" /></div>
+    <div class="field"><label>PUB Topic</label><input id="pub" value="gps/device/test1234/ecollar" /></div>
     <button id="btn-connect" type="submit">연결</button>
   </form>
 </section>
 
-<!-- 지도 -->
+<!-- 지도 + 상태 -->
 <section id="map-wrap">
   <div id="map"></div>
   <div id="status">브로커 연결 대기</div>
 </section>
 
 <!-- 로그 패널 -->
-<section id="panel" style="display: flex; flex-direction: column; height: 100vh; width: 340px; border-left: 1px solid #ccc; background: #fff; box-sizing: border-box; padding: 10px;">
+<section id="panel">
+  <div style="font-weight:bold;margin-bottom:4px;">수신 로그</div>
+  <div id="rx-log"></div>
 
-  <!-- 수신 로그 영역 (상단 50%) -->
-  <div style="font-weight: bold; margin-bottom: 4px;">수신 로그</div>
-  <div id="rx-log" style="flex: none; height: 50%; overflow-y: auto; font-size: 0.9em; border: 1px solid #eee; padding: 4px; box-sizing: border-box;"></div>
-
-  <!-- 메시지 입력 + 전송 로그 (하단 50%) -->
-  <div id="pub-ui" style="flex: none; height: 50%; display: flex; flex-direction: column; box-sizing: border-box;">
-    <div style="font-weight: bold;">메시지 전송</div>
-    <input id="msg-input" placeholder="메시지를 입력…" style="padding: 6px; border: 1px solid #bbb; border-radius: 4px; margin-bottom: 6px;" />
-    <button id="btn-publish" disabled style="padding: 8px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer;">Publish</button>
-
-    <div style="font-weight: bold; margin: 6px 0 4px;">전송 로그</div>
-    <div id="tx-log" style="flex: 1; overflow-y: auto; font-size: 0.9em; border: 1px solid #eee; padding: 4px;"></div>
+  <div id="pub-ui">
+    <div style="font-weight:bold;">메시지 전송</div>
+    <input id="msg-input" placeholder="메시지를 입력…" />
+    <button id="btn-publish" disabled>Publish</button>
+    <div style="font-weight:bold;margin:6px 0 4px;">전송 로그</div>
+    <div id="tx-log"></div>
   </div>
-
 </section>
 
 <script>
@@ -114,7 +122,6 @@ $('connect-card').addEventListener('submit',e=>{
   const sub=$('sub').value.trim();
   pubTopic=$('pub').value.trim();
   if(!host||!port||!sub||!pubTopic){alert('모든 필드를 입력하세요');return;}
-
   $('connect-wrap').style.display='none';
   $('map-wrap').style.display='block';
   $('panel').style.display='flex';
@@ -136,11 +143,15 @@ function connectMQTT(host,port,sub){
   client=new Paho.MQTT.Client(host,port,id);
   client.onConnectionLost=r=>$('status').textContent='연결 종료: '+r.errorMessage;
   client.onMessageArrived=onMsg;
-  client.connect({useSSL:true,onSuccess:()=>{
-    $('status').textContent='연결됨 (SUB '+sub+')';
-    client.subscribe(sub);
-    $('btn-publish').disabled=false;
-  },onFailure:r=>$('status').textContent='연결 실패: '+r.errorMessage});
+  client.connect({
+    useSSL:true,
+    onSuccess:()=>{
+      $('status').textContent='연결됨 (SUB '+sub+')';
+      client.subscribe(sub);
+      $('btn-publish').disabled=false;
+    },
+    onFailure:r=>$('status').textContent='연결 실패: '+r.errorMessage
+  });
 }
 function onMsg(m){
   log(m.payloadString,rxLog);
