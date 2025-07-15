@@ -4,12 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GPS·MQTT Tracker PWA</title>
-
-  <!-- 기본 PWA 설정 -->
   <meta name="theme-color" content="#007bff" />
   <link rel="manifest" href="manifest.webmanifest" />
 
-  <!-- 외부 라이브러리 -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" defer></script>
@@ -22,14 +19,28 @@
     #status{position:absolute;top:10px;left:10px;z-index:1000;background:#fff;padding:8px 15px;border-radius:5px;box-shadow:0 2px 4px rgba(0,0,0,.15)}
 
     #panel{width:340px;height:100vh;display:none;flex-direction:column;border-left:1px solid var(--border);background:#fff;padding:10px;box-sizing:border-box}
-    #rx-log{flex:1 1 50%;max-height:50%;overflow-y:auto;font-size:.9em}
-    #tx-log{flex:1 1 auto;overflow-y:auto;font-size:.9em;margin-top:6px}
+    #rx-log, #tx-log {
+      max-height: 50%;
+      overflow-y: auto;
+      font-size: .9em;
+      border: 1px solid #eee;
+      padding: 4px;
+      box-sizing: border-box;
+    }
     .log-entry{padding:4px 2px;border-bottom:1px solid #eee;word-wrap:break-word}
     .stamp{color:#888;font-size:.75em;display:block}
 
-    #pub-ui input{width:100%;padding:6px;border:1px solid #bbb;border-radius:4px;margin-bottom:6px;box-sizing:border-box}
-    #pub-ui button{width:100%;padding:8px;background:var(--primary);color:#fff;border:none;border-radius:4px;cursor:pointer}
-    #pub-ui button:hover{background:#0056b3}
+    #pub-ui input, #pub-ui button {
+      width: 100%; padding: 6px; box-sizing: border-box;
+    }
+    #pub-ui input {
+      border: 1px solid #bbb; border-radius: 4px; margin-bottom: 6px;
+    }
+    #pub-ui button {
+      background: var(--primary); color: #fff; border: none;
+      border-radius: 4px; cursor: pointer; margin-bottom: 10px;
+    }
+    #pub-ui button:hover {background:#0056b3}
 
     #connect-wrap{display:flex;align-items:center;justify-content:center;width:100vw;height:100vh}
     #connect-card{width:340px;background:#fff;padding:26px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
@@ -48,7 +59,8 @@
   </style>
 </head>
 <body>
-<!-- 접속폼 -->
+
+<!-- 접속 폼 -->
 <section id="connect-wrap">
   <form id="connect-card">
     <h2>MQTT 접속</h2>
@@ -60,36 +72,31 @@
   </form>
 </section>
 
-<!-- 지도 + 로그 -->
+<!-- 지도 -->
 <section id="map-wrap">
   <div id="map"></div>
   <div id="status">브로커 연결 대기</div>
 </section>
 
-<section id="panel" style="display: flex; flex-direction: column; height: 100vh; width: 340px; border-left: 1px solid #ccc; background: #fff; box-sizing: border-box; padding: 10px;">
+<!-- 로그 패널 -->
+<section id="panel">
+  <div style="font-weight:bold;margin-bottom:4px;">수신 로그</div>
+  <div id="rx-log"></div>
 
-  <div style="font-weight: bold; margin-bottom: 6px;">수신 로그</div>
-  <div id="rx-log" style="flex: none; max-height: 50%; overflow-y: auto; font-size: 0.9em;"></div>
-
-  <div id="pub-ui" style="flex: none; max-height: 50%; display: flex; flex-direction: column; margin-top: auto;">
-    <div style="font-weight: bold;">메시지 전송</div>
-    <input id="msg-input" placeholder="메시지를 입력…" style="width: 100%; padding: 6px; border: 1px solid #bbb; border-radius: 4px; margin-bottom: 6px; box-sizing: border-box;">
-    <button id="btn-publish" disabled style="width: 100%; padding: 8px; background: #007bff; color: #fff; border: none; border-radius: 4px; cursor: pointer;">Publish</button>
-
-    <div style="font-weight: bold; margin: 6px 0 4px;">전송 로그</div>
-    <div id="tx-log" style="flex: 1 1 auto; overflow-y: auto; font-size: 0.9em;"></div>
+  <div id="pub-ui" style="margin-top:auto;">
+    <div style="font-weight:bold;">메시지 전송</div>
+    <input id="msg-input" placeholder="메시지를 입력…">
+    <button id="btn-publish" disabled>Publish</button>
+    <div style="font-weight:bold;margin:6px 0 4px;">전송 로그</div>
+    <div id="tx-log"></div>
   </div>
-
 </section>
 
-<!-- PWA Service Worker 등록 -->
 <script>
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(console.error);
 }
-</script>
 
-<script>
 let map, marker, track, client, pubTopic;
 const MAX_LOG=50;
 const $=id=>document.getElementById(id);
@@ -125,9 +132,9 @@ function connectMQTT(host,port,sub){
   client.onConnectionLost=r=>$('status').textContent='연결 종료: '+r.errorMessage;
   client.onMessageArrived=onMsg;
   client.connect({useSSL:true,onSuccess:()=>{
-      $('status').textContent='연결됨 (SUB '+sub+')';
-      client.subscribe(sub);
-      $('btn-publish').disabled=false;
+    $('status').textContent='연결됨 (SUB '+sub+')';
+    client.subscribe(sub);
+    $('btn-publish').disabled=false;
   },onFailure:r=>$('status').textContent='연결 실패: '+r.errorMessage});
 }
 function onMsg(m){
